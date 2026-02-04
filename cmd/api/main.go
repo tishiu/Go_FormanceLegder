@@ -12,7 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"time"	
+	"time"
 
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"

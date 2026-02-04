@@ -1,4 +1,4 @@
-module github.com/yourusername/formance-ledger
+module Go_FormanceLegder
 
 go 1.25.5
 

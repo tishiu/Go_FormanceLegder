@@ -15,4 +15,3 @@ func HashPassword(raw string) (string, error) {
 func CheckPassword(hash string, raw string) error {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(raw))
 }
-

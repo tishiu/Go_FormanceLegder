@@ -1,0 +1,5 @@
+DROP TABLE IF EXISTS projector_offsets;
+DROP TABLE IF EXISTS postings;
+DROP TABLE IF EXISTS transactions;
+DROP TABLE IF EXISTS accounts;
+DROP TABLE IF EXISTS events;

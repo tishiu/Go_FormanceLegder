@@ -1,5 +1,5 @@
 -- Users table
-CREATE TABLE users
+CREATE TABLE IF NOT EXISTS users
 (
     id            UUID PRIMARY KEY     DEFAULT gen_random_uuid(),
     email         TEXT        NOT NULL UNIQUE,
@@ -8,7 +8,7 @@ CREATE TABLE users
 );
 
 -- Organizations table
-CREATE TABLE organizations
+CREATE TABLE IF NOT EXISTS organizations
 (
     id         UUID PRIMARY KEY     DEFAULT gen_random_uuid(),
     name       TEXT        NOT NULL,
@@ -16,7 +16,7 @@ CREATE TABLE organizations
 );
 
 -- Organization users junction table
-CREATE TABLE org_users
+CREATE TABLE IF NOT EXISTS org_users
 (
     id              UUID PRIMARY KEY     DEFAULT gen_random_uuid(),
     organization_id UUID        NOT NULL REFERENCES organizations (id) ON DELETE CASCADE,
@@ -26,11 +26,11 @@ CREATE TABLE org_users
     UNIQUE (organization_id, user_id)
 );
 
-CREATE INDEX idx_org_users_org ON org_users (organization_id);
-CREATE INDEX idx_org_users_user ON org_users (user_id);
+CREATE INDEX IF NOT EXISTS idx_org_users_org ON org_users (organization_id);
+CREATE INDEX IF NOT EXISTS idx_org_users_user ON org_users (user_id);
 
 -- Projects table
-CREATE TABLE projects
+CREATE TABLE IF NOT EXISTS projects
 (
     id              UUID PRIMARY KEY     DEFAULT gen_random_uuid(),
     organization_id UUID        NOT NULL REFERENCES organizations (id) ON DELETE CASCADE,
@@ -40,10 +40,10 @@ CREATE TABLE projects
     UNIQUE (organization_id, code)
 );
 
-CREATE INDEX idx_projects_org ON projects (organization_id);
+CREATE INDEX IF NOT EXISTS idx_projects_org ON projects (organization_id);
 
 -- Ledgers table
-CREATE TABLE ledgers
+CREATE TABLE IF NOT EXISTS ledgers
 (
     id         UUID PRIMARY KEY     DEFAULT gen_random_uuid(),
     project_id UUID        NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
@@ -54,10 +54,10 @@ CREATE TABLE ledgers
     UNIQUE (project_id, code)
 );
 
-CREATE INDEX idx_ledgers_project ON ledgers (project_id);
+CREATE INDEX IF NOT EXISTS idx_ledgers_project ON ledgers (project_id);
 
 -- API Keys table
-CREATE TABLE api_keys
+CREATE TABLE IF NOT EXISTS api_keys
 (
     id          UUID PRIMARY KEY     DEFAULT gen_random_uuid(),
     ledger_id   UUID        NOT NULL REFERENCES ledgers (id) ON DELETE CASCADE,
@@ -69,5 +69,5 @@ CREATE TABLE api_keys
     revoked_at  TIMESTAMPTZ
 );
 
-CREATE INDEX idx_api_keys_ledger ON api_keys (ledger_id);
-CREATE INDEX idx_api_keys_hash ON api_keys (key_hash);
+CREATE INDEX IF NOT EXISTS idx_api_keys_ledger ON api_keys (ledger_id);
+CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys (key_hash);
