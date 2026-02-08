@@ -2,7 +2,7 @@
 
 A high-performance, multi-tenant ledger service built with Go and React. Formance Ledger provides a robust system for tracking financial transactions, managing accounts, and maintaining accurate balances with double-entry accounting principles.
 
-![Dashboard Screenshot](web/public/logo.jpg)
+
 
 ## System Architecture
 
