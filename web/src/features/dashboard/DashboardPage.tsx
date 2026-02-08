@@ -1,23 +1,19 @@
 import { useEffect, useState } from "react";
-import { Routes, Route, Link, useNavigate, useLocation } from "react-router-dom";
+import { Routes, Route, useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
+import { TopNavbar } from "../../components/layout/TopNavbar";
 import {
-    LayoutGrid,
-    Layers,
-    Wallet,
-    ArrowLeftRight,
-    Webhook,
-    KeyRound,
-    LogOut,
     Plus,
-    Sun,
-    Moon,
     TrendingUp,
     Clock,
     ChevronRight,
     Activity,
     BarChart3,
-    Zap
+    Zap,
+    Layers,
+    Wallet,
+    ArrowLeftRight,
+    KeyRound,
 } from "lucide-react";
 
 // Theme hook with system preference detection
@@ -47,9 +43,7 @@ function useTheme() {
 
 export function DashboardPage() {
     const [user, setUser] = useState<{ email: string } | null>(null);
-    const [sidebarExpanded, setSidebarExpanded] = useState(false);
     const navigate = useNavigate();
-    const location = useLocation();
     const { isDark, toggle } = useTheme();
 
     useEffect(() => {
@@ -76,108 +70,19 @@ export function DashboardPage() {
         );
     }
 
-    const navItems = [
-        { path: "/dashboard", label: "Overview", icon: LayoutGrid },
-        { path: "/dashboard/ledgers", label: "Ledgers", icon: Layers },
-        { path: "/dashboard/accounts", label: "Accounts", icon: Wallet },
-        { path: "/dashboard/transactions", label: "Transactions", icon: ArrowLeftRight },
-        { path: "/dashboard/webhooks", label: "Webhooks", icon: Webhook },
-        { path: "/dashboard/api-keys", label: "API Keys", icon: KeyRound },
-    ];
-
-    const isActive = (path: string) => {
-        if (path === "/dashboard") return location.pathname === path;
-        return location.pathname.startsWith(path);
-    };
-
     return (
         <div className="min-h-screen bg-surface-light dark:bg-surface-dark transition-colors duration-300">
-            {/* Sidebar */}
-            <aside
-                className={`fixed left-0 top-0 h-full bg-sidebar-light dark:bg-sidebar-dark border-r border-border-light dark:border-border-dark flex flex-col transition-all duration-300 ease-out z-50 ${sidebarExpanded ? 'w-56' : 'w-16'
-                    }`}
-                onMouseEnter={() => setSidebarExpanded(true)}
-                onMouseLeave={() => setSidebarExpanded(false)}
-            >
-                {/* Logo */}
-                <div className="h-16 flex items-center px-3 border-b border-border-light dark:border-border-dark">
-                    <div className="w-10 h-10 rounded-xl overflow-hidden bg-white flex items-center justify-center shrink-0 transition-transform duration-300 hover:scale-105 shadow-sm">
-                        <img src="/logo.jpg" alt="Formance" className="w-full h-full object-cover" />
-                    </div>
-                    <div className={`ml-3 overflow-hidden transition-all duration-300 ${sidebarExpanded ? 'opacity-100 w-auto' : 'opacity-0 w-0'}`}>
-                        <h1 className="font-semibold text-text-primary-light dark:text-text-primary-dark whitespace-nowrap">Formance</h1>
-                        <p className="text-xs text-text-muted-light dark:text-text-muted-dark truncate max-w-[120px]">{user.email}</p>
-                    </div>
-                </div>
-
-                {/* Navigation */}
-                <nav className="flex-1 py-4 px-2 space-y-1 overflow-y-auto overflow-x-hidden">
-                    {navItems.map((item, index) => {
-                        const Icon = item.icon;
-                        const active = isActive(item.path);
-                        return (
-                            <Link
-                                key={item.path}
-                                to={item.path}
-                                className={`group relative flex items-center rounded-xl px-3 py-2.5 transition-all duration-200 ${active
-                                    ? "bg-primary text-white shadow-md shadow-primary/20"
-                                    : "text-text-secondary-light dark:text-text-secondary-dark hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-text-primary-light dark:hover:text-text-primary-dark"
-                                    }`}
-                                style={{ animationDelay: `${index * 50}ms` }}
-                            >
-                                <Icon className={`w-5 h-5 shrink-0 transition-transform duration-200 ${active ? '' : 'group-hover:scale-110'}`} />
-                                <span className={`ml-3 font-medium whitespace-nowrap transition-all duration-300 ${sidebarExpanded ? 'opacity-100' : 'opacity-0 w-0'
-                                    }`}>
-                                    {item.label}
-                                </span>
-                                {!sidebarExpanded && (
-                                    <span className="tooltip">{item.label}</span>
-                                )}
-                            </Link>
-                        );
-                    })}
-                </nav>
-
-                {/* Bottom Section */}
-                <div className="p-2 border-t border-border-light dark:border-border-dark space-y-1">
-                    {/* Theme Toggle */}
-                    <button
-                        onClick={toggle}
-                        className="group relative w-full flex items-center rounded-xl px-3 py-2.5 text-text-secondary-light dark:text-text-secondary-dark hover:bg-gray-100 dark:hover:bg-gray-800 transition-all duration-200"
-                    >
-                        <div className="relative w-5 h-5 shrink-0">
-                            <Sun className={`absolute inset-0 transition-all duration-300 ${isDark ? 'opacity-100 rotate-0' : 'opacity-0 rotate-90'}`} />
-                            <Moon className={`absolute inset-0 transition-all duration-300 ${isDark ? 'opacity-0 -rotate-90' : 'opacity-100 rotate-0'}`} />
-                        </div>
-                        <span className={`ml-3 font-medium whitespace-nowrap transition-all duration-300 ${sidebarExpanded ? 'opacity-100' : 'opacity-0 w-0'
-                            }`}>
-                            {isDark ? 'Light Mode' : 'Dark Mode'}
-                        </span>
-                        {!sidebarExpanded && (
-                            <span className="tooltip">{isDark ? 'Light Mode' : 'Dark Mode'}</span>
-                        )}
-                    </button>
-
-                    {/* Logout */}
-                    <button
-                        onClick={handleLogout}
-                        className="group relative w-full flex items-center rounded-xl px-3 py-2.5 text-accent-coral hover:bg-red-50 dark:hover:bg-red-900/20 transition-all duration-200"
-                    >
-                        <LogOut className="w-5 h-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
-                        <span className={`ml-3 font-medium whitespace-nowrap transition-all duration-300 ${sidebarExpanded ? 'opacity-100' : 'opacity-0 w-0'
-                            }`}>
-                            Logout
-                        </span>
-                        {!sidebarExpanded && (
-                            <span className="tooltip">Logout</span>
-                        )}
-                    </button>
-                </div>
-            </aside>
+            {/* Top Navbar */}
+            <TopNavbar
+                user={user}
+                onLogout={handleLogout}
+                isDark={isDark}
+                onToggleTheme={toggle}
+            />
 
             {/* Main Content */}
-            <main className="ml-16 min-h-screen transition-all duration-300">
-                <div className="p-8 animate-fade-in">
+            <main className="min-h-[calc(100vh-3.5rem)]">
+                <div className="max-w-7xl mx-auto p-6 sm:p-8 animate-fade-in">
                     <Routes>
                         <Route index element={<OverviewSection />} />
                         <Route path="ledgers" element={<LedgersSection />} />
