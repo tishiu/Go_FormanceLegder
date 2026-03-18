@@ -11,86 +11,93 @@ A high-performance, multi-tenant ledger service built with Go and React. Formanc
 ```mermaid
 graph TB
     subgraph "Client Layer"
-        Dashboard[React Dashboard<br/>- Ledger Management<br/>- API Keys<br/>- Transactions<br/>- Webhooks]
+        Dashboard[React + Vite Dashboard]
     end
-    
-    subgraph "API Layer"
-        API[API Server Go<br/>Port 8080]
-        AuthMW[Auth Middleware<br/>- JWT Validation<br/>- API Key Auth]
+
+    subgraph "API Service (cmd/api)"
+        API[net/http Server :8080]
+        DashboardHandlers[/api/auth, /api/ledgers, /api/ledgers/api-keys]
+        LedgerHandlers[/v1/transactions, /v1/accounts, /v1/events, /v1/balance, /v1/webhook-*]
+        Guard[dashboardauth.Guard<br/>Cookie JWT + org ownership checks]
+        APIKeyMW[auth.Middleware<br/>Bearer API key auth]
+        LedgerService[ledger.Service<br/>event append + webhook job enqueue]
+        LedgerRead[ledger.SQLLedgerRead<br/>read-side queries]
     end
-    
-    subgraph "Database - PostgreSQL"
+
+    subgraph "Worker Service (cmd/worker)"
+        RiverWorker[River Worker<br/>webhook.Worker]
+        Projector[projector.Projector<br/>poll events -> update read models]
+    end
+
+    subgraph "PostgreSQL"
         subgraph "IAM Tables"
-            Users[(users)]
-            Orgs[(organizations)]
-            OrgUsers[(org_users)]
-            Projects[(projects)]
-            Ledgers[(ledgers)]
-            APIKeys[(api_keys)]
+            IAM[(users, organizations, org_users, projects, ledgers, api_keys)]
         end
-        
+
         subgraph "Event Store"
             Events[(events<br/>Source of Truth)]
         end
-        
+
         subgraph "Read Models"
             Accounts[(accounts)]
             Transactions[(transactions)]
             Postings[(postings)]
+            Offsets[(projector_offsets)]
         end
-        
-        subgraph "Webhook System"
+
+        subgraph "Webhook + Queue"
             WebhookEP[(webhook_endpoints)]
             WebhookDel[(webhook_deliveries)]
-        end
-        
-        subgraph "Job Queue"
             RiverJobs[(river_job)]
         end
     end
-    
-    subgraph "Background Workers"
-        Projector[Projector Worker<br/>- Reads Events<br/>- Updates Read Models]
-        WebhookWorker[Webhook Worker<br/>River Queue<br/>- Delivers Webhooks]
-    end
-    
+
     subgraph "External"
-        CustomerWebhook[Customer Webhook<br/>Endpoints]
+        CustomerWebhook[Customer Webhook Endpoints]
     end
-    
+
     Dashboard -->|HTTPS| API
-    API --> AuthMW
-    AuthMW -->|Write Events| Events
-    AuthMW -->|Enqueue Jobs| RiverJobs
-    AuthMW -->|Read| Accounts
-    AuthMW -->|Read| Transactions
-    AuthMW -->|Manage| APIKeys
-    
-    Projector -->|Poll & Read| Events
+    API --> DashboardHandlers
+    API --> LedgerHandlers
+
+    DashboardHandlers --> Guard
+    LedgerHandlers --> APIKeyMW
+
+    LedgerHandlers --> LedgerService
+    LedgerHandlers --> LedgerRead
+    LedgerService -->|INSERT| Events
+    LedgerService -->|INSERT| RiverJobs
+    LedgerRead -->|SELECT| Accounts
+    LedgerRead -->|SELECT| Transactions
+    LedgerRead -->|SELECT| Postings
+    DashboardHandlers -->|SELECT/INSERT/UPDATE| IAM
+
+    RiverWorker -->|POLL| RiverJobs
+    RiverWorker -->|READ| Events
+    RiverWorker -->|READ| WebhookEP
+    RiverWorker -->|INSERT| WebhookDel
+    RiverWorker -->|HTTPS POST (signed)| CustomerWebhook
+
+    Projector -->|POLL| Events
     Projector -->|Update| Accounts
     Projector -->|Update| Transactions
     Projector -->|Update| Postings
-    
-    WebhookWorker -->|Poll Jobs| RiverJobs
-    WebhookWorker -->|Read| Events
-    WebhookWorker -->|Read| WebhookEP
-    WebhookWorker -->|Log| WebhookDel
-    WebhookWorker -->|HTTPS POST| CustomerWebhook
-    
+    Projector -->|Checkpoint| Offsets
+
     style Events fill:#ff9999
     style Projector fill:#99ccff
-    style WebhookWorker fill:#99ccff
+    style RiverWorker fill:#99ccff
 ```
 
 ## Tech Stack
 
 ### Backend
-- **Language:** Go (Golang) 1.22+
-- **Framework:** [Fiber](https://gofiber.io/) - High performance web framework
+- **Language:** Go (Golang) 1.25 (as configured in Dockerfiles)
+- **HTTP Server:** Standard library `net/http` (`http.ServeMux`)
 - **Database:** PostgreSQL 16
-- **ORM/Query Builder:** standard `database/sql` with [lib/pq](https://github.com/lib/pq)
-- **Migrations:** [Goose](https://github.com/pressly/goose)
-- **Project Structure:** Standard Go project layout (`cmd`, `internal`, `pkg`)
+- **DB Driver/Pool:** `pgx/v5` + `pgxpool`
+- **Queue/Jobs:** River (`github.com/riverqueue/river`)
+- **Migrations:** custom SQL runner (`cmd/migrate`) + River migrations (`rivermigrate`)
 
 ### Frontend
 - **Framework:** React 18
@@ -158,8 +165,8 @@ Ensure PostgreSQL is running and create a database named `ledger_kiro`.
     ```
     The API will be available at `http://localhost:8080`.
 
-4.  **Start the Worker (Optional):**
-    For background tasks (if applicable in future versions):
+4.  **Start the Worker:**
+    Required for event projection and webhook delivery:
     ```bash
     go run cmd/worker/main.go
     ```
@@ -188,19 +195,25 @@ Ensure PostgreSQL is running and create a database named `ledger_kiro`.
 ├── cmd/
 │   ├── api/            # API server entry point
 │   ├── migrate/        # Database migration tool
-│   └── worker/         # Background worker entry point
+│   ├── worker/         # Background worker entry point (projector + River workers)
+│   └── test-runner/    # Integration test runner container entry point
 ├── internal/
-│   ├── api/            # API handlers, middlewares, and routes
+│   ├── auth/           # JWT, API key auth, password helpers
 │   ├── config/         # Configuration loading
-│   ├── core/           # Domain logic and interfaces
-│   ├── database/       # Database connection and queries
-│   └── service/        # Business logic services
+│   ├── dashboard/      # Dashboard handlers (/api/*)
+│   ├── dashboardauth/  # Dashboard authorization guard
+│   ├── db/             # Database connection pool
+│   ├── events/         # Event store boundary + PGX implementation
+│   ├── ledger/         # Ledger command/read handlers + services
+│   ├── projector/      # Event projector to read models
+│   └── webhook/        # Webhook delivery engine + River worker
 ├── migrations/         # SQL migration files
 ├── web/                # React frontend application
 │   ├── src/
-│   │   ├── api/        # API integration
+│   │   ├── api/        # HTTP client + endpoint wrappers
 │   │   ├── components/ # Reusable UI components
-│   │   ├── features/   # Feature-based modules (Dashboard, Ledgers, etc.)
+│   │   ├── domain/     # Backend port abstraction
+│   │   ├── features/   # Feature pages (Auth, Dashboard)
 │   │   └── hooks/      # Custom React hooks
 │   └── public/         # Static assets
 └── .env                # Environment variables (gitignored)
