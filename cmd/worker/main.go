@@ -28,7 +28,7 @@ func main() {
 
 	// Setup River workers
 	workers := river.NewWorkers()
-	river.AddWorker(workers, &webhook.Worker{DB: pool})
+	river.AddWorker(workers, webhook.NewWorker(pool))
 
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Queues: map[string]river.QueueConfig{

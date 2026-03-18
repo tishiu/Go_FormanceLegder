@@ -1,8 +1,9 @@
 package projector
 
 import (
+	"Go_FormanceLegder/internal/events"
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math/big"
@@ -14,11 +15,15 @@ import (
 )
 
 type Projector struct {
-	DB *pgxpool.Pool
+	DB         *pgxpool.Pool
+	EventStore events.EventBoundary
 }
 
 func NewProjector(db *pgxpool.Pool) *Projector {
-	return &Projector{DB: db}
+	return &Projector{
+		DB:         db,
+		EventStore: events.NewPGXStore(),
+	}
 }
 
 func (p *Projector) Run(ctx context.Context) error {
@@ -44,51 +49,33 @@ func (p *Projector) projectBatch(ctx context.Context) error {
 	}
 	defer tx.Rollback(ctx)
 
-	// Load Events
-	type EventData struct {
-		ID, LedgerID, Type string
-		Payload            []byte
+	var lastProcessedEventID string
+	err = tx.QueryRow(ctx, `
+		SELECT last_processed_event_id
+		FROM projector_offsets
+		WHERE projector_name = 'ledger'
+	`).Scan(&lastProcessedEventID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
 	}
-	var events []EventData
+	if errors.Is(err, pgx.ErrNoRows) {
+		lastProcessedEventID = ""
+	}
 
-	rows, err := tx.Query(ctx, `
-       SELECT id, ledger_id, event_type, payload
-       FROM events
-       WHERE event_type = 'TransactionPosted'
-         AND id > COALESCE((SELECT last_processed_event_id FROM projector_offsets WHERE projector_name = 'ledger'), '00000000-0000-0000-0000-000000000000')
-       ORDER BY created_at, id
-       LIMIT 100
-    `)
+	eventBatch, maxEventID, err := p.eventStore().LoadTransactionPosted(ctx, tx, lastProcessedEventID, 100)
 	if err != nil {
 		return err
 	}
-	for rows.Next() {
-		var e EventData
-		if err := rows.Scan(&e.ID, &e.LedgerID, &e.Type, &e.Payload); err != nil {
-			rows.Close() // Nhớ close nếu return sớm
-			return err
-		}
-		events = append(events, e)
-	}
-	rows.Close()
 
-	if len(events) == 0 {
+	if len(eventBatch) == 0 {
 		return tx.Commit(ctx)
 	}
 
 	// Process
-	var maxEventID string
-	for _, event := range events {
-		var payload map[string]any
-		if err := json.Unmarshal(event.Payload, &payload); err != nil {
-			return fmt.Errorf("bad payload event %s: %w", event.ID, err)
+	for _, event := range eventBatch {
+		if err := p.applyTransactionPosted(ctx, tx, event.LedgerID, event.Data); err != nil {
+			return fmt.Errorf("failed apply event %s: %w", event.EventID, err)
 		}
-
-		// Pass tx xuống để xử lý
-		if err := p.applyTransactionPosted(ctx, tx, event.LedgerID, payload); err != nil {
-			return fmt.Errorf("failed apply event %s: %w", event.ID, err)
-		}
-		maxEventID = event.ID
 	}
 
 	// Update Offset
@@ -105,12 +92,8 @@ func (p *Projector) projectBatch(ctx context.Context) error {
 	return tx.Commit(ctx)
 }
 
-func (p *Projector) applyTransactionPosted(ctx context.Context, tx pgx.Tx, ledgerID string, payload map[string]any) error {
-	transactionID := payload["transaction_id"].(string)
-	externalID, _ := payload["external_id"].(string)
-	currency := payload["currency"].(string)
-	occurredAtStr := payload["occurred_at"].(string)
-	occurredAt, err := time.Parse(time.RFC3339Nano, occurredAtStr)
+func (p *Projector) applyTransactionPosted(ctx context.Context, tx pgx.Tx, ledgerID string, payload events.TransactionPosted) error {
+	occurredAt, err := time.Parse(time.RFC3339Nano, payload.OccurredAtRFC3339Nano)
 	if err != nil {
 		return fmt.Errorf("invalid time format: %w", err)
 	}
@@ -123,7 +106,7 @@ func (p *Projector) applyTransactionPosted(ctx context.Context, tx pgx.Tx, ledge
           id, ledger_id, external_id, amount, currency, occurred_at
        ) VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (id, ledger_id) DO NOTHING
-    `, transactionID, ledgerID, externalID, "0", currency, occurredAt)
+    `, payload.TransactionID, ledgerID, payload.ExternalID, "0", payload.Currency, occurredAt)
 	if err != nil {
 		return fmt.Errorf("insert transaction failed: %w", err)
 	}
@@ -133,16 +116,10 @@ func (p *Projector) applyTransactionPosted(ctx context.Context, tx pgx.Tx, ledge
 	}
 
 	// Process postings
-	postings, ok := payload["postings"].([]any)
-	if !ok {
-		return fmt.Errorf("invalid postings payload")
-	}
-
-	for _, raw := range postings {
-		pMap := raw.(map[string]any)
-		accountCode := pMap["account_code"].(string)
-		direction := pMap["direction"].(string)
-		amount := pMap["amount"].(string)
+	for _, posting := range payload.Postings {
+		accountCode := posting.AccountCode
+		direction := posting.Direction
+		amount := posting.Amount
 
 		// TODO: Find AccountID, using cache if possible
 		var accountID string
@@ -165,7 +142,7 @@ func (p *Projector) applyTransactionPosted(ctx context.Context, tx pgx.Tx, ledge
 				amount,
 				direction
 			) VALUES ($1, $2, $3, $4, $5, $6)
-		`, postingID, ledgerID, transactionID, accountID, amount, direction)
+		`, postingID, ledgerID, payload.TransactionID, accountID, amount, direction)
 		if err != nil {
 			return fmt.Errorf("insert posting failed: %w", err)
 		}
@@ -199,4 +176,11 @@ func (p *Projector) updateAccountBalance(ctx context.Context, tx pgx.Tx, account
     `, finalAmount.FloatString(10), accountID)
 
 	return err
+}
+
+func (p *Projector) eventStore() events.EventBoundary {
+	if p.EventStore != nil {
+		return p.EventStore
+	}
+	return events.NewPGXStore()
 }

@@ -1,7 +1,7 @@
 package dashboard
 
 import (
-	"Go_FormanceLegder/internal/auth"
+	"Go_FormanceLegder/internal/dashboardauth"
 	"encoding/json"
 	"net/http"
 
@@ -9,7 +9,8 @@ import (
 )
 
 type LedgerHandler struct {
-	DB *pgxpool.Pool
+	DB    *pgxpool.Pool
+	Guard dashboardauth.Guard
 }
 
 type LedgerResponse struct {
@@ -31,17 +32,15 @@ type CreateLedgerRequest struct {
 // GET /api/ledgers - List all ledgers for the authenticated user's organization
 func (h *LedgerHandler) ListLedgers(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-
-	// Extract JWT claims
-	cookie, err := r.Cookie("session")
-	if err != nil {
+	if h.Guard == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	claims, err := auth.ValidateJWT(cookie.Value, []byte("jwt-secret")) // TODO: use config
-	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	scope, ok := h.Guard.Must(w, r, dashboardauth.Target{
+		Kind: dashboardauth.KindOrg,
+	})
+	if !ok {
 		return
 	}
 
@@ -51,7 +50,7 @@ func (h *LedgerHandler) ListLedgers(w http.ResponseWriter, r *http.Request) {
 		JOIN projects p ON p.id = l.project_id
 		WHERE p.organization_id = $1
 		ORDER BY l.created_at DESC
-	`, claims.OrgID)
+	`, scope.OrgID)
 	if err != nil {
 		http.Error(w, "failed to query ledgers", http.StatusInternalServerError)
 		return
@@ -76,32 +75,25 @@ func (h *LedgerHandler) ListLedgers(w http.ResponseWriter, r *http.Request) {
 // GET /api/ledgers/:id - Get a specific ledger
 func (h *LedgerHandler) GetLedger(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-
-	cookie, err := r.Cookie("session")
-	if err != nil {
+	if h.Guard == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	claims, err := auth.ValidateJWT(cookie.Value, []byte("jwt-secret"))
-	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	ledgerID := r.URL.Query().Get("id")
-	if ledgerID == "" {
-		http.Error(w, "ledger id required", http.StatusBadRequest)
+	scope, ok := h.Guard.Must(w, r, dashboardauth.Target{
+		Kind:    dashboardauth.KindLedger,
+		IDParam: "id",
+	})
+	if !ok {
 		return
 	}
 
 	var ledger LedgerResponse
-	err = h.DB.QueryRow(ctx, `
+	err := h.DB.QueryRow(ctx, `
 		SELECT l.id, l.project_id, l.name, l.code, l.currency, l.created_at
 		FROM ledgers l
-		JOIN projects p ON p.id = l.project_id
-		WHERE l.id = $1 AND p.organization_id = $2
-	`, ledgerID, claims.OrgID).Scan(&ledger.ID, &ledger.ProjectID, &ledger.Name, &ledger.Code, &ledger.Currency, &ledger.CreatedAt)
+		WHERE l.id = $1
+	`, scope.LedgerID).Scan(&ledger.ID, &ledger.ProjectID, &ledger.Name, &ledger.Code, &ledger.Currency, &ledger.CreatedAt)
 	if err != nil {
 		http.Error(w, "ledger not found", http.StatusNotFound)
 		return
@@ -114,16 +106,15 @@ func (h *LedgerHandler) GetLedger(w http.ResponseWriter, r *http.Request) {
 // POST /api/ledgers - Create a new ledger
 func (h *LedgerHandler) CreateLedger(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-
-	cookie, err := r.Cookie("session")
-	if err != nil {
+	if h.Guard == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	claims, err := auth.ValidateJWT(cookie.Value, []byte("jwt-secret"))
-	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	scope, ok := h.Guard.Must(w, r, dashboardauth.Target{
+		Kind: dashboardauth.KindOrg,
+	})
+	if !ok {
 		return
 	}
 
@@ -135,10 +126,10 @@ func (h *LedgerHandler) CreateLedger(w http.ResponseWriter, r *http.Request) {
 
 	// Verify project belongs to user's organization
 	var projectOrgID string
-	err = h.DB.QueryRow(ctx, `
+	err := h.DB.QueryRow(ctx, `
 		SELECT organization_id FROM projects WHERE id = $1
 	`, req.ProjectID).Scan(&projectOrgID)
-	if err != nil || projectOrgID != claims.OrgID {
+	if err != nil || projectOrgID != scope.OrgID {
 		http.Error(w, "project not found", http.StatusNotFound)
 		return
 	}

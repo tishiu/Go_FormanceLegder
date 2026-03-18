@@ -4,6 +4,7 @@ import (
 	"Go_FormanceLegder/internal/auth"
 	"Go_FormanceLegder/internal/config"
 	"Go_FormanceLegder/internal/dashboard"
+	"Go_FormanceLegder/internal/dashboardauth"
 	"Go_FormanceLegder/internal/db"
 	"Go_FormanceLegder/internal/ledger"
 	"Go_FormanceLegder/internal/webhook"
@@ -30,7 +31,7 @@ func main() {
 	defer pool.Close()
 
 	workers := river.NewWorkers()
-	river.AddWorker(workers, &webhook.Worker{DB: pool})
+	river.AddWorker(workers, webhook.NewWorker(pool))
 
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Workers: workers,
@@ -39,17 +40,15 @@ func main() {
 		log.Fatalf("failed to create river client: %v", err)
 	}
 
-	// Create ledger service with River client
-	ledgerService := &ledger.Service{
-		DB:          pool,
-		RiverClient: riverClient,
-	}
-
-	ledgerHandler := &ledger.Handler{Service: ledgerService}
+	// Create ledger service/read facade with River client
+	ledgerService := ledger.NewService(pool, riverClient)
+	ledgerReader := ledger.NewSQLLedgerRead(pool)
+	ledgerHandler := &ledger.Handler{Service: ledgerService, Read: ledgerReader}
 
 	authHandler := &dashboard.AuthHandler{DB: pool, Config: cfg}
-	dashboardLedgerHandler := &dashboard.LedgerHandler{DB: pool}
-	apiKeyHandler := &dashboard.APIKeyHandler{DB: pool, APIKeySecret: cfg.APIKeySecret}
+	dashboardGuard := dashboardauth.NewGuard(pool, cfg.JWTSecret)
+	dashboardLedgerHandler := &dashboard.LedgerHandler{DB: pool, Guard: dashboardGuard}
+	apiKeyHandler := &dashboard.APIKeyHandler{DB: pool, APIKeySecret: cfg.APIKeySecret, Guard: dashboardGuard}
 	webhookHandler := &dashboard.WebhookHandler{DB: pool}
 
 	apiKeyAuth := &auth.Middleware{DB: pool, APIKeySecret: cfg.APIKeySecret}

@@ -1,13 +1,12 @@
 package ledger
 
 import (
+	"Go_FormanceLegder/internal/events"
 	"Go_FormanceLegder/internal/webhook"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -18,12 +17,14 @@ import (
 type Service struct {
 	DB          *pgxpool.Pool
 	RiverClient *river.Client[pgx.Tx]
+	EventStore  events.EventBoundary
 }
 
 func NewService(db *pgxpool.Pool, riverClient *river.Client[pgx.Tx]) *Service {
 	return &Service{
 		DB:          db,
 		RiverClient: riverClient,
+		EventStore:  events.NewPGXStore(),
 	}
 }
 
@@ -61,42 +62,33 @@ func (s *Service) PostTransaction(ctx context.Context, cmd PostTransactionComman
 		return "", err
 	}
 
-	// Append event
-	eventID := uuid.NewString()
 	transactionID := uuid.NewString()
 
-	payload := map[string]any{
-		"transaction_id": transactionID,
-		"external_id":    cmd.ExternalID,
-		"currency":       cmd.Currency,
-		"occurred_at":    cmd.OccurredAt.UTC().Format(time.RFC3339Nano),
-		"postings":       cmd.Postings,
+	postings := make([]events.Posting, 0, len(cmd.Postings))
+	for _, p := range cmd.Postings {
+		postings = append(postings, events.Posting{
+			AccountCode: p.AccountCode,
+			Direction:   p.Direction,
+			Amount:      p.Amount,
+		})
 	}
 
-	payloadJSON, err := json.Marshal(payload)
-	if err != nil {
-		return "", err
-	}
-
-	_, err = tx.Exec(ctx, `
-		INSERT INTO events (
-			id,
-			ledger_id,
-			aggregate_type,
-			aggregate_id,
-			event_type,
-			payload,
-			occurred_at,
-			idempotency_key
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`, eventID, cmd.LedgerID, "ledger", transactionID, "TransactionPosted", payloadJSON, cmd.OccurredAt, cmd.IdempotencyKey)
+	event, err := s.eventStore().AppendTransactionPosted(ctx, tx, events.AppendInput{
+		LedgerID:       cmd.LedgerID,
+		TransactionID:  transactionID,
+		ExternalID:     cmd.ExternalID,
+		IdempotencyKey: cmd.IdempotencyKey,
+		Currency:       cmd.Currency,
+		OccurredAt:     cmd.OccurredAt,
+		Postings:       postings,
+	})
 	if err != nil {
 		return "", err
 	}
 
 	// Enqueue webhook job atomically
 	_, err = s.RiverClient.InsertTx(ctx, tx, webhook.WebhookArgs{
-		EventID:  eventID,
+		EventID:  event.EventID,
 		LedgerID: cmd.LedgerID,
 	}, nil)
 	if err != nil {
@@ -151,4 +143,11 @@ func (s *Service) loadAndLockAccounts(ctx context.Context, tx pgx.Tx, ledgerID s
 	}
 
 	return accounts, nil
+}
+
+func (s *Service) eventStore() events.EventBoundary {
+	if s.EventStore != nil {
+		return s.EventStore
+	}
+	return events.NewPGXStore()
 }

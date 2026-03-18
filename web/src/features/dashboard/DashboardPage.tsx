@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Routes, Route, useNavigate } from "react-router-dom";
-import { api } from "../../api/client";
 import { TopNavbar } from "../../components/layout/TopNavbar";
+import { backendPort } from "../../domain/backend";
 import {
     Plus,
     TrendingUp,
@@ -47,16 +47,21 @@ export function DashboardPage() {
     const { isDark, toggle } = useTheme();
 
     useEffect(() => {
-        // Cookie-based auth: just try to get user info
-        api.get("/auth/me")
-            .then((res) => setUser(res.data))
+        backendPort.bootstrap()
+            .then((snapshot) => {
+                if (snapshot.status === "authenticated" && snapshot.user) {
+                    setUser({ email: snapshot.user.email });
+                    return;
+                }
+                navigate("/login");
+            })
             .catch(() => navigate("/login"));
     }, [navigate]);
 
     const handleLogout = () => {
-        // Clear cookie by calling logout endpoint or just redirect
-        document.cookie = "session=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
-        navigate("/login");
+        void backendPort.request("auth.logout", undefined).finally(() => {
+            navigate("/login");
+        });
     };
 
     if (!user) {

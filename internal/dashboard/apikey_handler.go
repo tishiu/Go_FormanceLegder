@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"Go_FormanceLegder/internal/auth"
+	"Go_FormanceLegder/internal/dashboardauth"
 	"encoding/base32"
 	"encoding/json"
 	"math/rand"
@@ -14,6 +15,7 @@ import (
 type APIKeyHandler struct {
 	DB           *pgxpool.Pool
 	APIKeySecret []byte
+	Guard        dashboardauth.Guard
 }
 
 type APIKeyResponse struct {
@@ -39,35 +41,16 @@ type CreateAPIKeyResponse struct {
 // GET /api/ledgers/:ledgerId/api-keys
 func (h *APIKeyHandler) ListAPIKeys(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-
-	cookie, err := r.Cookie("session")
-	if err != nil {
+	if h.Guard == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	claims, err := auth.ValidateJWT(cookie.Value, []byte("jwt-secret"))
-	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	ledgerID := r.URL.Query().Get("ledger_id")
-	if ledgerID == "" {
-		http.Error(w, "ledger_id required", http.StatusBadRequest)
-		return
-	}
-
-	// Verify ledger belongs to user's organization
-	var projectOrgID string
-	err = h.DB.QueryRow(ctx, `
-		SELECT p.organization_id
-		FROM ledgers l
-		JOIN projects p ON p.id = l.project_id
-		WHERE l.id = $1
-	`, ledgerID).Scan(&projectOrgID)
-	if err != nil || projectOrgID != claims.OrgID {
-		http.Error(w, "ledger not found", http.StatusNotFound)
+	scope, ok := h.Guard.Must(w, r, dashboardauth.Target{
+		Kind:    dashboardauth.KindLedger,
+		IDParam: "ledger_id",
+	})
+	if !ok {
 		return
 	}
 
@@ -76,7 +59,7 @@ func (h *APIKeyHandler) ListAPIKeys(w http.ResponseWriter, r *http.Request) {
 		FROM api_keys
 		WHERE ledger_id = $1
 		ORDER BY created_at DESC
-	`, ledgerID)
+	`, scope.LedgerID)
 	if err != nil {
 		http.Error(w, "failed to query api keys", http.StatusInternalServerError)
 		return
@@ -105,35 +88,16 @@ func (h *APIKeyHandler) ListAPIKeys(w http.ResponseWriter, r *http.Request) {
 // POST /api/ledgers/:ledgerId/api-keys
 func (h *APIKeyHandler) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-
-	cookie, err := r.Cookie("session")
-	if err != nil {
+	if h.Guard == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	claims, err := auth.ValidateJWT(cookie.Value, []byte("jwt-secret"))
-	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	ledgerID := r.URL.Query().Get("ledger_id")
-	if ledgerID == "" {
-		http.Error(w, "ledger_id required", http.StatusBadRequest)
-		return
-	}
-
-	// Verify ledger belongs to user's organization
-	var projectOrgID string
-	err = h.DB.QueryRow(ctx, `
-		SELECT p.organization_id
-		FROM ledgers l
-		JOIN projects p ON p.id = l.project_id
-		WHERE l.id = $1
-	`, ledgerID).Scan(&projectOrgID)
-	if err != nil || projectOrgID != claims.OrgID {
-		http.Error(w, "ledger not found", http.StatusNotFound)
+	scope, ok := h.Guard.Must(w, r, dashboardauth.Target{
+		Kind:    dashboardauth.KindLedger,
+		IDParam: "ledger_id",
+	})
+	if !ok {
 		return
 	}
 
@@ -166,7 +130,7 @@ func (h *APIKeyHandler) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 		INSERT INTO api_keys (ledger_id, key_hash, prefix, description, is_active)
 		VALUES ($1, $2, $3, $4, true)
 		RETURNING id
-	`, ledgerID, keyHash, prefix, req.Description).Scan(&keyID)
+	`, scope.LedgerID, keyHash, prefix, req.Description).Scan(&keyID)
 	if err != nil {
 		http.Error(w, "failed to create api key", http.StatusInternalServerError)
 		return
@@ -187,45 +151,25 @@ func (h *APIKeyHandler) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 // POST /api/api-keys/:id/revoke
 func (h *APIKeyHandler) RevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-
-	cookie, err := r.Cookie("session")
-	if err != nil {
+	if h.Guard == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	claims, err := auth.ValidateJWT(cookie.Value, []byte("jwt-secret"))
-	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	keyID := r.URL.Query().Get("id")
-	if keyID == "" {
-		http.Error(w, "key id required", http.StatusBadRequest)
-		return
-	}
-
-	// Verify key belongs to user's organization
-	var projectOrgID string
-	err = h.DB.QueryRow(ctx, `
-		SELECT p.organization_id
-		FROM api_keys k
-		JOIN ledgers l ON l.id = k.ledger_id
-		JOIN projects p ON p.id = l.project_id
-		WHERE k.id = $1
-	`, keyID).Scan(&projectOrgID)
-	if err != nil || projectOrgID != claims.OrgID {
-		http.Error(w, "api key not found", http.StatusNotFound)
+	scope, ok := h.Guard.Must(w, r, dashboardauth.Target{
+		Kind:    dashboardauth.KindAPIKey,
+		IDParam: "id",
+	})
+	if !ok {
 		return
 	}
 
 	// Revoke key
-	_, err = h.DB.Exec(ctx, `
+	_, err := h.DB.Exec(ctx, `
 		UPDATE api_keys
 		SET is_active = false, revoked_at = NOW()
 		WHERE id = $1
-	`, keyID)
+	`, scope.APIKeyID)
 	if err != nil {
 		http.Error(w, "failed to revoke api key", http.StatusInternalServerError)
 		return

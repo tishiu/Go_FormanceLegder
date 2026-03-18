@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
-import { api } from "../../api/client";
 import { useNavigate, Link } from "react-router-dom";
 import { Mail, Lock, ArrowRight, Sun, Moon, Sparkles } from "lucide-react";
+import { backendPort } from "../../domain/backend";
 
 export function RegisterPage() {
     const [email, setEmail] = useState("");
@@ -29,8 +29,7 @@ export function RegisterPage() {
         setError(null);
         setLoading(true);
         try {
-            await api.post("/auth/register", { email, password });
-            // Backend sets session cookie, redirect to dashboard
+            await backendPort.request("auth.register", { email, password });
             navigate("/dashboard");
         } catch (err: unknown) {
             const axiosError = err as { response?: { status?: number; data?: string } };

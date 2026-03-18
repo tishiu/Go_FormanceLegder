@@ -4,8 +4,6 @@ import (
 	"Go_FormanceLegder/internal/ledger"
 	"Go_FormanceLegder/internal/webhook"
 	"context"
-	"testing"
-	"time"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
@@ -13,6 +11,8 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
+	"testing"
+	"time"
 )
 
 func TestPostTransactionEndToEnd(t *testing.T) {
@@ -40,7 +40,7 @@ func TestPostTransactionEndToEnd(t *testing.T) {
 
 	// Setup River
 	workers := river.NewWorkers()
-	river.AddWorker(workers, &webhook.Worker{DB: pool})
+	river.AddWorker(workers, webhook.NewWorker(pool))
 
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Workers: workers,
@@ -50,10 +50,7 @@ func TestPostTransactionEndToEnd(t *testing.T) {
 	}
 
 	// Create ledger service
-	ledgerService := &ledger.Service{
-		DB:          pool,
-		RiverClient: riverClient,
-	}
+	ledgerService := ledger.NewService(pool, riverClient)
 
 	// Seed test data
 	seedTestData(t, pool)
@@ -154,7 +151,7 @@ func runMigrations(t *testing.T, pool *pgxpool.Pool) {
 	if err != nil {
 		t.Fatalf("failed to create migrator: %v", err)
 	}
-	
+
 	_, err = migrator.Migrate(ctx, rivermigrate.DirectionUp, nil)
 	if err != nil {
 		t.Fatalf("failed to run river migrations: %v", err)

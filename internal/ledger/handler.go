@@ -9,6 +9,7 @@ import (
 
 type Handler struct {
 	Service *Service
+	Read    LedgerRead
 }
 
 type PostTransactionRequest struct {
@@ -62,4 +63,11 @@ func (h *Handler) PostTransaction(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(resp)
+}
+
+func (h *Handler) scope(ledgerID string) LedgerScope {
+	if h.Read != nil {
+		return h.Read.ForLedger(ledgerID)
+	}
+	return NewSQLLedgerRead(h.Service.DB).ForLedger(ledgerID)
 }

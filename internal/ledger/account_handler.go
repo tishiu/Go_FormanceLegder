@@ -25,27 +25,10 @@ func (h *Handler) ListAccounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := h.Service.DB.Query(ctx, `
-		SELECT id, code, name, type, balance, created_at
-		FROM accounts
-		WHERE ledger_id = $1
-		ORDER BY code
-	`, principal.LedgerID)
+	accounts, err := h.scope(principal.LedgerID).ListAccounts(ctx)
 	if err != nil {
 		http.Error(w, "failed to query accounts", http.StatusInternalServerError)
 		return
-	}
-	defer rows.Close()
-
-	accounts := []AccountResponse{}
-	for rows.Next() {
-		var acc AccountResponse
-		err = rows.Scan(&acc.ID, &acc.Code, &acc.Name, &acc.Type, &acc.Balance, &acc.CreatedAt)
-		if err != nil {
-			http.Error(w, "failed to scan account", http.StatusInternalServerError)
-			return
-		}
-		accounts = append(accounts, acc)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -69,12 +52,7 @@ func (h *Handler) GetAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var acc AccountResponse
-	err = h.Service.DB.QueryRow(ctx, `
-		SELECT id, code, name, type, balance, created_at
-		FROM accounts
-		WHERE ledger_id = $1 AND code = $2
-	`, principal.LedgerID, code).Scan(&acc.ID, &acc.Code, &acc.Name, &acc.Type, &acc.Balance, &acc.CreatedAt)
+	acc, err := h.scope(principal.LedgerID).GetAccount(ctx, code)
 	if err != nil {
 		http.Error(w, "account not found", http.StatusNotFound)
 		return
