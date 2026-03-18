@@ -16,8 +16,8 @@ graph TB
 
     subgraph "API Service (cmd/api)"
         API[net/http Server :8080]
-        DashboardHandlers[/api/auth, /api/ledgers, /api/ledgers/api-keys]
-        LedgerHandlers[/v1/transactions, /v1/accounts, /v1/events, /v1/balance, /v1/webhook-*]
+        DashboardHandlers["/api/auth, /api/ledgers, /api/ledgers/api-keys"]
+        LedgerHandlers["/v1/transactions, /v1/accounts, /v1/events, /v1/balance, /v1/webhook-*"]
         Guard[dashboardauth.Guard<br/>Cookie JWT + org ownership checks]
         APIKeyMW[auth.Middleware<br/>Bearer API key auth]
         LedgerService[ledger.Service<br/>event append + webhook job enqueue]
