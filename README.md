@@ -76,7 +76,7 @@ graph TB
     RiverWorker -->|READ| Events
     RiverWorker -->|READ| WebhookEP
     RiverWorker -->|INSERT| WebhookDel
-    RiverWorker -->|HTTPS POST (signed)| CustomerWebhook
+    RiverWorker -->|HTTPS POST signed| CustomerWebhook
 
     Projector -->|POLL| Events
     Projector -->|Update| Accounts
